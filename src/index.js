@@ -3,22 +3,12 @@
 //import 'babel-polyfill'
 
 import Emitter from 'eventemitter3'
-import { MongoClient } from 'mongodb'
+
 import createDebug from 'debug'
 import createFilter from './filter'
 import createStream from './stream'
 
-const mongodb = require("mongodb");
-const Timestamp = mongodb.Timestamp;
-const fs = require('fs');
-
-const MONGO_URI = 'mongodb://127.0.0.1:27017/local'
 const debug = createDebug('mongo-oplog')
-export const events = {
-  i: 'insert',
-  u: 'update',
-  d: 'delete'
-}
 
 // Add callback support to promise
 const toCb = fn => cb => {
@@ -34,45 +24,15 @@ const toCb = fn => cb => {
   }
 }
 
-export default (uri, options = {}) => {
-  let db
+export default (options = {}) => {
   let stream
-  let connected = false
-  const { ns, posfile, coll, ...opts } = options
-
-	var since;
-	try {
-		since = Timestamp.fromString(fs.readFileSync(posfile, "utf-8"));
-	} catch (err) {
-		var now = Math.floor((new Date()).getTime() / 1000);
-		since = new Timestamp(0, now);
-	}
+  let { db, ns, ts, coll} = options
 
   const oplog = new Emitter()
 
-  let ts = since
-  uri = uri || MONGO_URI
-
-  if (typeof uri !== 'string') {
-    if (uri && uri.collection) {
-      db = uri
-      connected = true
-    } else {
-      throw new Error('Invalid mongo db.')
-    }
-  }
-
-  async function connect() {
-    if (connected) return db
-    db = await MongoClient.connect(uri, opts)
-    connected = true
-		db = db.db('local')
-  }
-
-  async function tail(dataHandler) {
+  async function tail() {
     try {
       debug('Connected to oplog database')
-      await connect()
       stream = await createStream({ ns, coll, ts, db })
       stream.on('end', onend)
       stream.on('data', (doc)=>{ondata(doc);})
@@ -95,8 +55,6 @@ export default (uri, options = {}) => {
 
   async function destroy() {
     await stop()
-    await db.close(true)
-    connected = false
     return oplog
   }
 
@@ -104,11 +62,14 @@ export default (uri, options = {}) => {
     if (oplog.ignore) return oplog
     debug('incoming data %j', doc)
     ts = doc.ts
-		
-		fs.writeFileSync(posfile, ts);
 
     oplog.emit('op', doc)
-    oplog.emit(events[doc.op], doc)
+    // const events = {
+    //   i: 'insert',
+    //   u: 'update',
+    //   d: 'delete'
+    // }
+    //oplog.emit(events[doc.op], doc)
     return oplog
   }
 
